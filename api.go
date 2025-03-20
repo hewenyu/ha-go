@@ -131,9 +131,41 @@ func (a *API) GetServices() (map[string]map[string]interface{}, error) {
 		return nil, fmt.Errorf("failed to get services: %s", resp.Status)
 	}
 
+	// 先尝试解析为数组格式（新版Home Assistant API）
+	var servicesArray []map[string]interface{}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read response body: %v", err)
+	}
+
+	if err := json.Unmarshal(body, &servicesArray); err == nil {
+		// 成功解析为数组，将其转换为需要的map格式
+		result := make(map[string]map[string]interface{})
+		for _, svc := range servicesArray {
+			domain, ok := svc["domain"].(string)
+			if !ok {
+				continue
+			}
+
+			// 如果域名不存在，初始化
+			if _, exists := result[domain]; !exists {
+				result[domain] = make(map[string]interface{})
+			}
+
+			// 如果有服务字段，添加该服务
+			if services, ok := svc["services"].(map[string]interface{}); ok {
+				for serviceName, serviceData := range services {
+					result[domain][serviceName] = serviceData
+				}
+			}
+		}
+		return result, nil
+	}
+
+	// 如果不是数组格式，回退到尝试直接解析为map格式（旧版API）
 	var services map[string]map[string]interface{}
-	if err := json.NewDecoder(resp.Body).Decode(&services); err != nil {
-		return nil, err
+	if err := json.Unmarshal(body, &services); err != nil {
+		return nil, fmt.Errorf("failed to decode services: %v", err)
 	}
 
 	return services, nil
